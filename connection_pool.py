@@ -29,39 +29,31 @@ class ConnectionPool:
             port=self.port)
         self.connection_pool = new_connection_pool
 
-    def read_data(self, query, params=None, fetch=all):
+    def execute_query(self, query, params=None, fetch=all):
+        to_read = False
         connection = self.connection_pool.getconn()
         cursor = connection.cursor()
         connection.autocommit = False
+        if query.split()[0].upper() == "SELECT":
+            to_read = True
         try:
             cursor.execute(query, params)
-            if fetch == "one":
-                result = cursor.fetchone()
-            else:
-                result = cursor.fetchall()
-            data = [dict(zip([key[0] for key in cursor.description], row)) for row in result]
+            if to_read:
+                if fetch == "one":
+                    result = cursor.fetchone()
+                else:
+                    result = cursor.fetchall()
+                data = [dict(zip([key[0] for key in cursor.description], row)) for row in result]
         except (Exception, psycopg2.DatabaseError) as error:
             connection.rollback()
-            return error
-        else:
-            connection.commit()
-            return data
-        finally:
-            cursor.close()
-            self.connection_pool.putconn(connection)
-
-    def write_data(self, query, params=None):
-        connection = self.connection_pool.getconn()
-        cursor = connection.cursor()
-        connection.autocommit = False
-        try:
-            cursor.execute(query, params)
-        except (Exception, psycopg2.DatabaseError) as error:
-            connection.rollback()
+            print(error)
             return False
         else:
             connection.commit()
-            return True
+            if to_read:
+                return data
+            else:
+                return True
         finally:
             cursor.close()
             self.connection_pool.putconn(connection)
