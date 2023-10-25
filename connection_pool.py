@@ -1,6 +1,8 @@
+import psycopg2
 import psycopg2.pool
 import psycopg2.extensions
 from db_config import config
+from concurrent.futures import ThreadPoolExecutor
 
 config_data = config()
 
@@ -16,8 +18,9 @@ class ConnectionPool:
         self.min_connections = min_connections
         self.max_connections = max_connections
         self.connection_pool = None
-        self.available_connections = 0
+        self.num_available_connections = 0
         self.create_connection_pool()
+
 
     def create_connection_pool(self):
         new_connection_pool = psycopg2.pool.ThreadedConnectionPool(
@@ -28,25 +31,32 @@ class ConnectionPool:
             password=self.password,
             host=self.host,
             port=self.port)
-        self.available_connections = self.max_connections
+        self.num_available_connections = self.max_connections
         self.connection_pool = new_connection_pool
 
     def acquire_connection(self):
-        if self.available_connections > 0:
-            connection = self.connection_pool.getconn()
-            self.available_connections -= 1
-            return connection
+        if self.num_available_connections > 0:
+            try:
+                connection = self.connection_pool.getconn()
+                if connection is not None:
+                    self.num_available_connections -= 1
+                    return connection
+            except Exception as error:
+                print(f"Error acquiring connection: {error}")
         else:
             raise Exception("Max connections limit reached. Cannot acquire more connections.")
 
     def release_connection(self, connection):
-        self.connection_pool.putconn(connection)
-        self.available_connections += 1
+        try:
+            self.connection_pool.putconn(connection)
+        except Exception as error:
+            print(f"Error releasing connection: {error}")
+        else:
+            self.num_available_connections += 1
 
     def execute_query(self, query, params=None, fetch="all"):
         to_read = query.split()[0].upper() == "SELECT"
         connection = None
-        cursor = None
         try:
             connection = self.acquire_connection()
             cursor = connection.cursor()
@@ -63,15 +73,19 @@ class ConnectionPool:
         except Exception as error:
             if connection:
                 connection.rollback()
-            return error
+            print(error)
         else:
+            print(connection)
             connection.commit()
-            return data
-        finally:
             cursor.close()
             self.release_connection(connection)
+            print(data)
 
-
+    def execute_queries_using_threads(self, queries, num_threads=5):
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(self.execute_query, query) for query in queries]
+            for future in futures:
+                future.result()
 
     def close_connection_pool(self):
         self.connection_pool.closeall()
@@ -79,3 +93,4 @@ class ConnectionPool:
 
 if __name__ == '__main__':
     connection_pool = ConnectionPool()
+
