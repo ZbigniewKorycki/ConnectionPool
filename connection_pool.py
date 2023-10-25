@@ -44,16 +44,13 @@ class ConnectionPool:
         self.available_connections += 1
 
     def execute_query(self, query, params=None, fetch="all"):
-        to_read = False
+        to_read = query.split()[0].upper() == "SELECT"
+        connection = None
+        cursor = None
         try:
             connection = self.acquire_connection()
             cursor = connection.cursor()
             connection.autocommit = False
-        except Exception as e:
-            return e
-        if query.split()[0].upper() == "SELECT":
-            to_read = True
-        try:
             cursor.execute(query, params)
             if to_read:
                 if fetch == "one":
@@ -61,19 +58,20 @@ class ConnectionPool:
                 else:
                     result = cursor.fetchall()
                 data = [dict(zip([key[0] for key in cursor.description], row)) for row in result]
-        except (Exception, psycopg2.DatabaseError) as error:
-            connection.rollback()
-            print(error)
-            return False
+            else:
+                data = None
+        except Exception as error:
+            if connection:
+                connection.rollback()
+            return error
         else:
             connection.commit()
-            if to_read:
-                return data
-            else:
-                return True
+            return data
         finally:
             cursor.close()
             self.release_connection(connection)
+
+
 
     def close_connection_pool(self):
         self.connection_pool.closeall()
