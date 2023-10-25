@@ -7,7 +7,7 @@ config_data = config()
 
 class ConnectionPool:
     def __init__(self, database=config_data['database'], user=config_data['user'], password=config_data['password'],
-                 host=config_data['host'], port=config_data['port'], min_connections=5, max_connections=10):
+                 host=config_data['host'], port=config_data['port'], min_connections=5, max_connections=100):
         self.database = database
         self.user = user
         self.password = password
@@ -16,6 +16,7 @@ class ConnectionPool:
         self.min_connections = min_connections
         self.max_connections = max_connections
         self.connection_pool = None
+        self.available_connections = 0
         self.create_connection_pool()
 
     def create_connection_pool(self):
@@ -27,13 +28,29 @@ class ConnectionPool:
             password=self.password,
             host=self.host,
             port=self.port)
+        self.available_connections = self.max_connections
         self.connection_pool = new_connection_pool
 
-    def execute_query(self, query, params=None, fetch=all):
+    def acquire_connection(self):
+        if self.available_connections > 0:
+            connection = self.connection_pool.getconn()
+            self.available_connections -= 1
+            return connection
+        else:
+            raise Exception("Max connections limit reached. Cannot acquire more connections.")
+
+    def release_connection(self, connection):
+        self.connection_pool.putconn(connection)
+        self.available_connections += 1
+
+    def execute_query(self, query, params=None, fetch="all"):
         to_read = False
-        connection = self.connection_pool.getconn()
-        cursor = connection.cursor()
-        connection.autocommit = False
+        try:
+            connection = self.acquire_connection()
+            cursor = connection.cursor()
+            connection.autocommit = False
+        except Exception as e:
+            return e
         if query.split()[0].upper() == "SELECT":
             to_read = True
         try:
@@ -56,7 +73,7 @@ class ConnectionPool:
                 return True
         finally:
             cursor.close()
-            self.connection_pool.putconn(connection)
+            self.release_connection(connection)
 
     def close_connection_pool(self):
         self.connection_pool.closeall()
