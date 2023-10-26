@@ -1,9 +1,7 @@
 import psycopg2
-import psycopg2.extensions
 from db_config import config
 import time
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+from apscheduler.schedulers.background import BackgroundScheduler
 
 config_data = config()
 
@@ -39,17 +37,36 @@ class ConnectionPool:
             connection = Connection()
             self.connection_pool.append(connection)
         else:
-            print(f"Max connections ({self.max_connections}) limit reached. Cannot create more connections.")
+            print(
+                f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
+            )
 
     def get_connection(self):
         connection = self.connection_pool[0]
         self.connection_pool.remove(connection)
         return connection
 
-    def return_connection(self, connection):
+    def release_connection(self, connection):
         self.connection_pool.append(connection)
 
+    def delete_connection(self, connection):
+        self.connection_pool.remove(connection)
+
+    def remove_inactive_connections(self):
+        print("checking")
+        for connection in self.connection_pool:
+            if len(self.connection_pool) > self.min_connections:
+                if not connection.closed():
+                    self.connection_pool.remove(connection)
 
 
 if __name__ == "__main__":
     connection_pool = ConnectionPool()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(connection_pool.remove_inactive_connections, 'interval', minutes=1)
+    scheduler.start()
+    try:
+        while True:
+            time.sleep(2)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
