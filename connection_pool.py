@@ -2,14 +2,38 @@ import psycopg2
 import psycopg2.pool
 import psycopg2.extensions
 from db_config import config
+import time
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 config_data = config()
 
 
+class Connection:
+    def __init__(
+        self,
+        database=config_data["database"],
+        user=config_data["user"],
+        password=config_data["password"],
+        host=config_data["host"],
+        port=config_data["port"],
+    ):
+        self.connection = psycopg2.connect(
+            dbname=database, user=user, password=password, host=host, port=port
+        )
+
+
 class ConnectionPool:
-    def __init__(self, database=config_data['database'], user=config_data['user'], password=config_data['password'],
-                 host=config_data['host'], port=config_data['port'], min_connections=5, max_connections=100):
+    def __init__(
+        self,
+        database=config_data["database"],
+        user=config_data["user"],
+        password=config_data["password"],
+        host=config_data["host"],
+        port=config_data["port"],
+        min_connections=5,
+        max_connections=100,
+    ):
         self.database = database
         self.user = user
         self.password = password
@@ -20,7 +44,7 @@ class ConnectionPool:
         self.connection_pool = None
         self.num_available_connections = 0
         self.create_connection_pool()
-
+        self.connections = list()
 
     def create_connection_pool(self):
         new_connection_pool = psycopg2.pool.ThreadedConnectionPool(
@@ -30,7 +54,8 @@ class ConnectionPool:
             user=self.user,
             password=self.password,
             host=self.host,
-            port=self.port)
+            port=self.port,
+        )
         self.num_available_connections = self.max_connections
         self.connection_pool = new_connection_pool
 
@@ -44,7 +69,9 @@ class ConnectionPool:
             except Exception as error:
                 print(f"Error acquiring connection: {error}")
         else:
-            raise Exception("Max connections limit reached. Cannot acquire more connections.")
+            raise Exception(
+                "Max connections limit reached. Cannot acquire more connections."
+            )
 
     def release_connection(self, connection):
         try:
@@ -67,23 +94,37 @@ class ConnectionPool:
                     result = cursor.fetchone()
                 else:
                     result = cursor.fetchall()
-                data = [dict(zip([key[0] for key in cursor.description], row)) for row in result]
+                data = [
+                    dict(zip([key[0] for key in cursor.description], row))
+                    for row in result
+                ]
             else:
                 data = None
         except Exception as error:
             if connection:
                 connection.rollback()
-            print(error)
+            return error
         else:
             print(connection)
+            self.connections.append(connection)
             connection.commit()
             cursor.close()
             self.release_connection(connection)
-            print(data)
+            return data
+
+    def worker_function(self, query):
+        try:
+            data = self.execute_query(query)
+            if data:
+                print(data)
+        except Exception as error:
+            print(f"Error in worker_function: {error}")
 
     def execute_queries_using_threads(self, queries, num_threads=5):
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(self.execute_query, query) for query in queries]
+            futures = [
+                executor.submit(self.worker_function, query) for query in queries
+            ]
             for future in futures:
                 future.result()
 
@@ -91,6 +132,5 @@ class ConnectionPool:
         self.connection_pool.closeall()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     connection_pool = ConnectionPool()
-
