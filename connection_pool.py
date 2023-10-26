@@ -25,38 +25,30 @@ class Connection:
 class ConnectionPool:
     def __init__(self, min_connections=5, max_connections=100):
         self.connection_pool = list()
-        self.get_starting_connections(min_connections)
+        self.initiate_starting_connections(min_connections)
+        self.min_connections = min_connections
+        self.max_connections = max_connections
 
-    def get_starting_connections(self, num_connections):
+    def initiate_starting_connections(self, num_connections):
         for _ in range(num_connections):
             connection = Connection()
             self.connection_pool.append(connection)
 
-    def acquire_connection(self):
-        if self.num_available_connections > 0:
-            try:
-                connection = self.connection_pool.getconn()
-                if connection is not None:
-                    self.num_available_connections -= 1
-                    return connection
-            except Exception as error:
-                print(f"Error acquiring connection: {error}")
+    def create_connection(self):
+        if len(self.connection_pool) < self.max_connections:
+            connection = Connection()
+            self.connection_pool.append(connection)
         else:
-            raise Exception(
-                "Max connections limit reached. Cannot acquire more connections."
-            )
+            print(f"Max connections ({self.max_connections}) limit reached. Cannot create more connections.")
 
-    def release_connection(self, connection):
-        try:
-            self.connection_pool.putconn(connection)
-        except Exception as error:
-            print(f"Error releasing connection: {error}")
-        else:
-            self.num_available_connections += 1
+    def get_connection(self):
+        connection = self.connection_pool[0]
+        self.connection_pool.remove(connection)
+        return connection
 
+    def return_connection(self, connection):
+        self.connection_pool.append(connection)
 
-    def close_connection_pool(self):
-        self.connection_pool.closeall()
 
 
 if __name__ == "__main__":
