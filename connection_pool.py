@@ -2,6 +2,7 @@ import psycopg2
 from db_config import config
 import time
 from apscheduler.schedulers.background import BackgroundScheduler
+from threading import Lock
 
 config_data = config()
 
@@ -23,47 +24,77 @@ class Connection:
 class ConnectionPool:
     def __init__(self, min_connections=5, max_connections=100):
         self.connection_pool = list()
-        self.initiate_starting_connections(min_connections)
         self.min_connections = min_connections
         self.max_connections = max_connections
+        self.add_connections_to_minimum_amount()
+        self.lock = Lock()
 
-    def initiate_starting_connections(self, num_connections):
-        for _ in range(num_connections):
-            connection = Connection()
-            self.connection_pool.append(connection)
+    def add_connections_to_minimum_amount(self):
+        self.lock.acquire()
+        try:
+            while len(self.connection_pool) < self.min_connections:
+                connection = self.create_connection()
+                self.add_connection_to_pool(connection)
+        finally:
+            self.lock.release()
 
-    def create_connection(self):
+    def create_connection(self, max_retries=3):
         if len(self.connection_pool) < self.max_connections:
-            connection = Connection()
-            self.connection_pool.append(connection)
+            retries = 0
+            while retries < max_retries:
+                try:
+                    connection = Connection()
+                except Exception as error:
+                    print(f"Error when creating new connection: {error}")
+                    retries += 1
+                else:
+                    return connection
+            return None
         else:
             print(
                 f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
             )
 
-    def get_connection(self):
-        connection = self.connection_pool[0]
-        self.connection_pool.remove(connection)
-        return connection
+    def add_connection_to_pool(self, connection):
+        self.lock.acquire()
+        try:
+            self.connection_pool.append(connection)
+        finally:
+            self.lock.release()
 
-    def release_connection(self, connection):
-        self.connection_pool.append(connection)
+    def delete_connection_from_pool(self, connection):
+        self.lock.acquire()
+        try:
+            self.connection_pool.remove(connection)
+        finally:
+            self.lock.release()
 
-    def delete_connection(self, connection):
-        self.connection_pool.remove(connection)
+    def get_connection_from_pool(self):
+        self.lock.acquire()
+        try:
+            connection = self.connection_pool[0]
+            self.connection_pool.remove(connection)
+            return connection
+        finally:
+            self.lock.release()
 
     def remove_inactive_connections(self):
-        print("checking")
-        for connection in self.connection_pool:
-            if len(self.connection_pool) > self.min_connections:
-                if not connection.closed():
-                    self.connection_pool.remove(connection)
+        self.lock.acquire()
+        try:
+            for connection in self.connection_pool:
+                if len(self.connection_pool) > self.min_connections:
+                    if not connection.closed():
+                        self.connection_pool.remove(connection)
+        finally:
+            self.lock.release()
 
 
 if __name__ == "__main__":
     connection_pool = ConnectionPool()
     scheduler = BackgroundScheduler()
-    scheduler.add_job(connection_pool.remove_inactive_connections, 'interval', minutes=1)
+    scheduler.add_job(
+        connection_pool.remove_inactive_connections, "interval", minutes=1
+    )
     scheduler.start()
     try:
         while True:
