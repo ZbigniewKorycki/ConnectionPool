@@ -1,48 +1,42 @@
-def execute_query(self, query, params=None, fetch="all"):
-    to_read = query.split()[0].upper() == "SELECT"
-    connection = None
+from connection_pool import ConnectionPool
+import time
+import concurrent.futures
+
+
+def execute_query_test(pool, thread):
     try:
-        connection = self.acquire_connection()
-        cursor = connection.cursor()
-        connection.autocommit = False
-        cursor.execute(query, params)
-        if to_read:
-            if fetch == "one":
-                result = cursor.fetchone()
-            else:
-                result = cursor.fetchall()
-            data = [
-                dict(zip([key[0] for key in cursor.description], row))
-                for row in result
-            ]
-        else:
-            data = None
-    except Exception as error:
-        if connection:
-            connection.rollback()
-        return error
-    else:
-        print(connection)
-        self.connections.append(connection)
-        connection.commit()
-        cursor.close()
-        self.release_connection(connection)
-        return data
-
-
-def worker_function(self, query):
-    try:
-        data = self.execute_query(query)
-        if data:
-            print(data)
-    except Exception as error:
-        print(f"Error in worker_function: {error}")
-
-
-def execute_queries_using_threads(self, queries, num_threads=5):
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [
-            executor.submit(self.worker_function, query) for query in queries
+        query = """SELECT * FROM employees;"""
+        connection = pool.get_connection_from_pool()
+        cursor = connection.cursor
+        cursor.execute(query)
+        result = cursor.fetchall()
+        data = [
+            dict(zip([key[0] for key in cursor.description], row)) for row in result
         ]
-        for future in futures:
-            future.result()
+    except Exception as error:
+        print(f"{thread}: {error}")
+    else:
+        pool.release_connection_to_pool(connection)
+        print(f"{thread}: {data}")
+
+
+connection_pool = ConnectionPool()
+
+
+test_duration_sec = 15
+num_threads = 8
+
+start_time = time.time()
+
+while (time.time() - start_time) < test_duration_sec:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [
+            executor.submit(execute_query_test, connection_pool, f"Thread-{x}")
+            for x in range(num_threads)
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as error:
+                print(f"Exception in future: {error}")
+
