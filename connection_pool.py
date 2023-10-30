@@ -33,7 +33,7 @@ class ConnectionPool:
         self.max_connections = max_connections
         self.add_connections_to_minimum_quantity()
 
-        schedule.every(1).minute.do(self.manage_and_refresh_connections)
+        schedule.every(5).minutes.do(self.manage_and_refresh_connections)
 
     def add_connections_to_minimum_quantity(self):
         self.lock.acquire()
