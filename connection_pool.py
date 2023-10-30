@@ -1,92 +1,98 @@
 import psycopg2
 from db_config import config
-import time
-from apscheduler.schedulers.background import BackgroundScheduler
-import threading
+from threading import Lock
 import schedule
+import random
 
 config_data = config()
 
 
 class Connection:
     def __init__(
-        self,
-        database=config_data["database"],
-        user=config_data["user"],
-        password=config_data["password"],
-        host=config_data["host"],
-        port=config_data["port"],
+            self,
+            database=config_data["database"],
+            user=config_data["user"],
+            password=config_data["password"],
+            host=config_data["host"],
+            port=config_data["port"],
     ):
         self.conn = psycopg2.connect(
             dbname=database, user=user, password=password, host=host, port=port
         )
+        self.cursor = self.conn.cursor()
+        self.is_use = False
 
 
 class ConnectionPool:
     def __init__(self, min_connections=5, max_connections=100):
         self.connection_pool = list()
+        self.lock = Lock()
         self.min_connections = min_connections
         self.max_connections = max_connections
-        self.add_connections_to_minimum_amount()
-        self.scheduled_job()
-        self.lock = threading.Lock()
+        self.add_connections_to_minimum_quantity()
+        self.periodic_process()
 
-    def add_connections_to_minimum_amount(self):
+    def add_connections_to_minimum_quantity(self):
         self.lock.acquire()
         try:
             while len(self.connection_pool) < self.min_connections:
-                connection = self.create_connection()
-                self.add_connection_to_pool(connection)
+                self.add_connection_to_pool()
         finally:
             self.lock.release()
 
-    def create_connection(self, max_retries=3):
-        self.lock.acquire()
-        try:
-            if len(self.connection_pool) < self.max_connections:
-                retries = 0
-                while retries < max_retries:
-                    try:
-                        connection = Connection()
-                    except Exception as error:
-                        print(f"Error when creating new connection: {error}")
-                        retries += 1
-                    else:
-                        return connection
-                return None
-            else:
-                print(
-                    f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
-                )
-        finally:
-            self.lock.release()
-
-    def add_connection_to_pool(self, connection):
-        self.connection_pool.append(connection)
-
-    def delete_connection_from_pool(self, connection):
-        self.connection_pool.remove(connection)
+    def add_connection_to_pool(self, max_retries=3):
+        if len(self.connection_pool) < self.max_connections:
+            retries = 0
+            while retries < max_retries:
+                try:
+                    connection = Connection()
+                except Exception as error:
+                    print(f"Error when creating new connection: {error}")
+                    retries += 1
+                else:
+                    self.connection_pool.append(connection)
+                    break
+        else:
+            pass
+            print(
+                f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
+            )
 
     def get_connection_from_pool(self):
-        connection = self.connection_pool[0]
-        self.connection_pool.remove(connection)
-        return connection
-
-    def remove_inactive_connections_add_minimum_connections(self):
-        print("checking")
         self.lock.acquire()
         try:
-            for connection in self.connection_pool:
-                if connection.conn.closed == 1 or connection.conn is None:
-                    self.connection_pool.remove(connection)
-            if len(self.connection_pool) < self.max_connections:
-                self.add_connections_to_minimum_amount()
+            available_connections = [connection for connection in self.connection_pool if connection.is_use is False]
+            connection = random.choice(available_connections)
+        except Exception as error:
+            print(f"Error when getting connection from pool: {error}")
+        else:
+            connection.is_use = True
+            return connection
         finally:
             self.lock.release()
 
-    def scheduled_job(self):
-        schedule.every(1).minute.do(
-            self.remove_inactive_connections_add_minimum_connections
+    def release_connection_to_pool(self, connection):
+        self.lock.acquire()
+        try:
+            connection.is_use = False
+        finally:
+            self.lock.release()
+
+    def manage_and_refresh_connections(self):
+        self.lock.acquire()
+        try:
+            active_connections = [connection for connection in self.connection_pool if connection.is_use is True]
+            if len(active_connections) >= self.min_connections:
+                self.connection_pool = active_connections
+            else:
+                self.connection_pool = active_connections
+                self.add_connections_to_minimum_quantity()
+        finally:
+            self.lock.release()
+
+    def periodic_process(self):
+        schedule.every(5).seconds.do(
+            self.manage_and_refresh_connections
         )
 
 
