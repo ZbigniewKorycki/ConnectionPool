@@ -4,7 +4,7 @@ import time
 import concurrent.futures
 
 
-def execute_query_test(pool, thread):
+def test_execute_query(pool, thread):
     try:
         query = """select * FROM employees;"""
         connection = pool.get_connection_from_pool()
@@ -14,8 +14,8 @@ def execute_query_test(pool, thread):
         data = [
             dict(zip([key[0] for key in cursor.description], row)) for row in result
         ]
-    except Exception as error:
-        print(f"Thread: {thread}, {error}")
+    except Exception as e:
+        print(f"Thread: {thread}, {e}")
     else:
         pool.release_connection_to_pool(connection)
         print(f"Thread: {thread}, Data:{data[0]}")
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     while (time.time() - start_time) < test_duration_sec:
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [
-                executor.submit(execute_query_test, connection_pool, thread_nr)
+                executor.submit(test_execute_query, connection_pool, thread_nr)
                 for thread_nr in range(num_threads)
             ]
             for future in concurrent.futures.as_completed(futures):
