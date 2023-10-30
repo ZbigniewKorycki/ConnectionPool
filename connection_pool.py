@@ -2,8 +2,8 @@ import psycopg2
 from db_config import config
 from threading import Lock
 import schedule
-import random
 import time
+from threading import Semaphore
 
 config_data = config()
 
@@ -27,6 +27,7 @@ class Connection:
 class ConnectionPool:
     def __init__(self, min_connections=5, max_connections=100):
         self.connection_pool = list()
+        self.semaphore = Semaphore()
         self.lock = Lock()
         self.min_connections = min_connections
         self.max_connections = max_connections
@@ -43,20 +44,26 @@ class ConnectionPool:
             self.lock.release()
 
     def add_connection_to_pool(self):
-        to_add = False
-        if len(self.connection_pool) < self.max_connections:
-            to_add = True
-        if to_add:
+        if self.semaphore.acquire(blocking=False):
+            to_add = False
             try:
-                connection = Connection()
-            except Exception as error:
-                print(f"Error when creating new connections: {error}")
-            else:
-                self.connection_pool.append(connection)
+                if len(self.connection_pool) < self.max_connections:
+                    to_add = True
+                else:
+                    print(
+                        f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
+                    )
+                if to_add:
+                    try:
+                        connection = Connection()
+                    except Exception as error:
+                        print(f"Error when creating new connections: {error}")
+                    else:
+                        self.connection_pool.append(connection)
+            finally:
+                self.semaphore.release()
         else:
-            print(
-                f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
-            )
+            print("Can't add connection. Blocked semaphore.")
 
     def get_connection_from_pool(self):
         self.lock.acquire()
@@ -64,7 +71,7 @@ class ConnectionPool:
             if len(self.connection_pool) < self.max_connections:
                 self.add_connection_to_pool()
             available_connections = [connection for connection in self.connection_pool if connection.is_use is False]
-            connection = random.choice(available_connections)
+            connection = available_connections[0]
         except Exception as error:
             print(f"Error when getting connection from pool: {error}")
         else:
