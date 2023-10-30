@@ -3,6 +3,7 @@ from db_config import config
 from threading import Lock
 import schedule
 import random
+import time
 
 config_data = config()
 
@@ -30,7 +31,8 @@ class ConnectionPool:
         self.min_connections = min_connections
         self.max_connections = max_connections
         self.add_connections_to_minimum_quantity()
-        self.periodic_process()
+
+        schedule.every(1).minute.do(self.manage_and_refresh_connections)
 
     def add_connections_to_minimum_quantity(self):
         self.lock.acquire()
@@ -79,22 +81,21 @@ class ConnectionPool:
             self.lock.release()
 
     def manage_and_refresh_connections(self):
-        self.lock.acquire()
-        try:
-            active_connections = [connection for connection in self.connection_pool if connection.is_use is True]
-            if len(active_connections) >= self.min_connections:
-                self.connection_pool = active_connections
-            else:
-                self.connection_pool = active_connections
-                self.add_connections_to_minimum_quantity()
-        finally:
-            self.lock.release()
+        active_connections = [connection for connection in self.connection_pool if connection.is_use is True]
+        if len(active_connections) >= self.min_connections:
+            self.connection_pool = active_connections
+        else:
+            self.connection_pool = active_connections
+            self.add_connections_to_minimum_quantity()
 
-    def periodic_process(self):
-        schedule.every(15).seconds.do(
-            self.manage_and_refresh_connections
-        )
+    def run_scheduler(self):
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
 
+    def stop_scheduler(self):
+        print("Scheduler stopped")
 
 if __name__ == "__main__":
     connection_pool = ConnectionPool()
+
