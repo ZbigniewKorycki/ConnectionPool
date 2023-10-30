@@ -40,20 +40,18 @@ class ConnectionPool:
         finally:
             self.lock.release()
 
-    def add_connection_to_pool(self, max_retries=3):
+    def add_connection_to_pool(self):
+        to_add = False
         if len(self.connection_pool) < self.max_connections:
-            retries = 0
-            while retries < max_retries:
-                try:
-                    connection = Connection()
-                except Exception as error:
-                    print(f"Error when creating new connection: {error}")
-                    retries += 1
-                else:
-                    self.connection_pool.append(connection)
-                    break
+            to_add = True
+        if to_add:
+            try:
+                connection = Connection()
+            except Exception as error:
+                print(f"Error when creating new connections: {error}")
+            else:
+                self.connection_pool.append(connection)
         else:
-            pass
             print(
                 f"Max connections ({self.max_connections}) limit reached. Cannot create more connections."
             )
@@ -61,6 +59,8 @@ class ConnectionPool:
     def get_connection_from_pool(self):
         self.lock.acquire()
         try:
+            if len(self.connection_pool) < self.max_connections:
+                self.add_connection_to_pool()
             available_connections = [connection for connection in self.connection_pool if connection.is_use is False]
             connection = random.choice(available_connections)
         except Exception as error:
@@ -91,7 +91,7 @@ class ConnectionPool:
             self.lock.release()
 
     def periodic_process(self):
-        schedule.every(5).seconds.do(
+        schedule.every(15).seconds.do(
             self.manage_and_refresh_connections
         )
 
