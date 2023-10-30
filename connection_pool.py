@@ -96,6 +96,6 @@ class ConnectionPool:
     def stop_scheduler(self):
         print("Scheduler stopped")
 
+
 if __name__ == "__main__":
     connection_pool = ConnectionPool()
-
