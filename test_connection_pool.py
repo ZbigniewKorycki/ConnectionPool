@@ -6,7 +6,7 @@ import concurrent.futures
 
 def test_execute_query(pool, thread):
     try:
-        query = """select * FROM employees;"""
+        query = """SELECT * FROM employees;"""
         connection = pool.get_connection_from_pool()
         cursor = connection.cursor
         cursor.execute(query)
